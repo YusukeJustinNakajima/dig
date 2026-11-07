@@ -1,6 +1,6 @@
 # dig
 
-A local `dig` wrapper for macOS. The actual query is still sent by the system's built-in `/usr/bin/dig`. This project only appends a local TXT record after your own terminal output, to make local testing easier.
+A local `dig` wrapper for macOS and Linux. The actual query is still sent by the system `dig` binary at `/usr/bin/dig`. This project only appends a local TXT record after your own terminal output, to make local testing easier.
 
 It does not change DNS, does not write zone files, and does not touch any cloud provider.
 
@@ -51,17 +51,28 @@ A second query for the same domain **does not** append a `_zcode-verify` marker 
 
 ## Installation
 
-macOS only; requires `/usr/bin/dig` and `/usr/bin/python3`, with no pip dependencies.
+Supported on macOS and Linux. Requires `/usr/bin/dig` and `/usr/bin/python3`, with no pip dependencies. On Linux, install dig and Python 3 first:
 
 ```sh
-git clone https://github.com/xsser/dig.git
+# Debian / Ubuntu
+sudo apt install dnsutils python3
+
+# Fedora / RHEL
+sudo dnf install bind-utils python3
+
+# Arch Linux
+sudo pacman -S bind python
+```
+
+```sh
+git clone https://github.com/YusukeJustinNakajima/dig.git
 cd dig
 ./scripts/install.sh
 export PATH="$HOME/.local/bin:$PATH"
 command -v dig    # should be ~/.local/bin/dig
 ```
 
-The install script backs up any existing `~/.local/bin/dig` first. If `command -v dig` is not this path, the wrapper will not take effect at all.
+The install script backs up any existing `~/.local/bin/dig` first. If `command -v dig` is not this path, the wrapper will not take effect at all. On Linux the installer records the system dig checksum with `sha256sum` (or `shasum`); macOS-specific code-signature metadata is skipped.
 
 An already-open zsh may still remember the old path; run `rehash` once.
 
@@ -93,6 +104,6 @@ make verify
 
 ## Limitations
 
-- Only works on macOS, and only when `~/.local/bin` precedes other entries in PATH
+- Works on macOS and Linux, and only when `~/.local/bin` precedes other entries in PATH
 - The extra TXT exists only in the output of this command
 - It does not replace a recursive resolver or authoritative server, and does not change the DNS network path used by `/usr/bin/dig`

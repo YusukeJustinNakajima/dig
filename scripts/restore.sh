@@ -14,7 +14,13 @@ die() {
 }
 
 sha256_file() {
-    /usr/bin/shasum -a 256 "$1" | /usr/bin/awk '{print $1}'
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | /usr/bin/awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | /usr/bin/awk '{print $1}'
+    else
+        die 'sha256sum or shasum is required'
+    fi
 }
 
 read_one_line() {

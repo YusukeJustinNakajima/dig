@@ -8,6 +8,7 @@ REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 WRAPPER=${1:-"$REPO_ROOT/src/dig_wrapper.py"}
 REAL_DIG=/usr/bin/dig
 PYTHON=/usr/bin/python3
+SYSTEM=$(uname -s)
 MARKER='_zcode-verify= zcode-verify-a3f8d92e6b1c'
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/stateful-dig-wrapper-test.XXXXXX")
 
@@ -336,7 +337,7 @@ def read_counts(home, label):
     return counts
 
 
-# The raw newline and `\\010` spellings are the same wire name for Apple's dig;
+# The raw newline and `\\010` spellings are the same wire name for dig;
 # they must share a counter.  ANSI must likewise use an escaped synthetic owner.
 ansi_raw = "ansi-\x1b[31m-control.example"
 ansi_key = r"ansi-\027\09131m-control.example"
@@ -908,12 +909,13 @@ printf '%s\n' '@127.0.0.1 -p 9 nested-regular-inner.example A +short +time=1 +tr
 printf '%s\n' "-f $nested_regular_inner @127.0.0.1 -p 9 +short +time=1 +tries=1" > "$nested_regular_outer"
 assert_nested_batch_transparent 'ordinary nested -f batch' "$nested_regular_home" "$nested_regular_outer"
 
-# -x has Apple-compatible literal-dot fallback for non-IPv6 spellings; -i only
-# affects a following IPv6 -x, including a top-level default for batch lines.
+# -x has literal-dot fallback for non-IPv6 spellings on both macOS and Linux.
+# The obsolete -i IPv6/ip6.int option only exists in Apple's dig, so those
+# cases run only on Darwin.
 x_variants_home=$(new_home x-variants)
 x_top_i_batch="$TEST_ROOT/x-top-i.batch"
 x_scoped_batch="$TEST_ROOT/x-scoped.batch"
-"$PYTHON" - "$WRAPPER" "$MARKER" "$x_variants_home" "$x_top_i_batch" "$x_scoped_batch" <<'PY'
+"$PYTHON" - "$WRAPPER" "$MARKER" "$x_variants_home" "$x_top_i_batch" "$x_scoped_batch" "$SYSTEM" <<'PY'
 import ipaddress
 import json
 import os
@@ -921,7 +923,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-wrapper, marker, home, top_batch, scoped_batch = sys.argv[1:]
+wrapper, marker, home, top_batch, scoped_batch, system = sys.argv[1:]
 environment = os.environ.copy()
 environment["HOME"] = home
 marker_bytes = marker.encode("utf-8")
@@ -969,45 +971,46 @@ expected_counts = {}
 for label, value, owner in variants:
     run_twice(label, base + ["-x", value] + tail, owner)
     expected_counts[owner] = 2
-before_value = "2001:db8::2"
-after_value = "2001:db8::3"
-before_owner = ip6_pointer(before_value, True)
-after_owner = ip6_pointer(after_value, False)
-run_twice("-i before IPv6 -x", base + ["-i", "-x", before_value] + tail, before_owner)
-run_twice("-i after IPv6 -x", base + ["-x", after_value, "-i"] + tail, after_owner)
-expected_counts[before_owner] = 2
-expected_counts[after_owner] = 2
-Path(top_batch).write_text(
-    "@127.0.0.1 -p 9 -x 2001:db8::4 +time=1 +tries=1\n",
-    encoding="utf-8",
-)
-top_owner = ip6_pointer("2001:db8::4", True)
-run_twice("top-level -i batch default", ["-i", "-f", top_batch], top_owner)
-expected_counts[top_owner] = 2
-Path(scoped_batch).write_text(
-    "@127.0.0.1 -p 9 -x 2001:db8::5 -i +time=1 +tries=1\n"
-    "@127.0.0.1 -p 9 -i -x 2001:db8::6 +time=1 +tries=1\n",
-    encoding="utf-8",
-)
-scoped_arpa = ip6_pointer("2001:db8::5", False)
-scoped_int = ip6_pointer("2001:db8::6", True)
-for attempt, expected in ((1, []), (2, [])):
-    try:
-        result = subprocess.run(
-            [wrapper, "-f", scoped_batch],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=environment,
-            timeout=5,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        raise SystemExit("FAIL: scoped IPv6 batch attempt {} timed out".format(attempt))
-    lines = [line for line in result.stdout.splitlines() if marker_bytes in line]
-    if result.returncode != 9 or lines != expected:
-        raise SystemExit("FAIL: scoped IPv6 batch semantics are wrong on attempt {}".format(attempt))
-expected_counts[scoped_arpa] = 2
-expected_counts[scoped_int] = 2
+if system == "Darwin":
+    before_value = "2001:db8::2"
+    after_value = "2001:db8::3"
+    before_owner = ip6_pointer(before_value, True)
+    after_owner = ip6_pointer(after_value, False)
+    run_twice("-i before IPv6 -x", base + ["-i", "-x", before_value] + tail, before_owner)
+    run_twice("-i after IPv6 -x", base + ["-x", after_value, "-i"] + tail, after_owner)
+    expected_counts[before_owner] = 2
+    expected_counts[after_owner] = 2
+    Path(top_batch).write_text(
+        "@127.0.0.1 -p 9 -x 2001:db8::4 +time=1 +tries=1\n",
+        encoding="utf-8",
+    )
+    top_owner = ip6_pointer("2001:db8::4", True)
+    run_twice("top-level -i batch default", ["-i", "-f", top_batch], top_owner)
+    expected_counts[top_owner] = 2
+    Path(scoped_batch).write_text(
+        "@127.0.0.1 -p 9 -x 2001:db8::5 -i +time=1 +tries=1\n"
+        "@127.0.0.1 -p 9 -i -x 2001:db8::6 +time=1 +tries=1\n",
+        encoding="utf-8",
+    )
+    scoped_arpa = ip6_pointer("2001:db8::5", False)
+    scoped_int = ip6_pointer("2001:db8::6", True)
+    for attempt, expected in ((1, []), (2, [])):
+        try:
+            result = subprocess.run(
+                [wrapper, "-f", scoped_batch],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment,
+                timeout=5,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            raise SystemExit("FAIL: scoped IPv6 batch attempt {} timed out".format(attempt))
+        lines = [line for line in result.stdout.splitlines() if marker_bytes in line]
+        if result.returncode != 9 or lines != expected:
+            raise SystemExit("FAIL: scoped IPv6 batch semantics are wrong on attempt {}".format(attempt))
+    expected_counts[scoped_arpa] = 2
+    expected_counts[scoped_int] = 2
 state_path = Path(home) / ".cache" / "dig-zcode-wrapper" / "state.json"
 with state_path.open(encoding="utf-8") as handle:
     state = json.load(handle)
@@ -1176,8 +1179,8 @@ finally:
     thread.join(timeout=1)
 PY
 
-# SIGKILL is not signal()-able on macOS.  The helper must still terminate the
-# subprocess by signal with no Python traceback or other output.
+# SIGKILL is not catchable.  The helper must still terminate the subprocess
+# by signal with no Python traceback or other output.
 "$PYTHON" - "$WRAPPER" <<'PY'
 import subprocess
 import sys
@@ -1214,7 +1217,7 @@ PY
 # must preserve preceding -t/-i state instead of resetting it as a new command.
 boundary_home=$(new_home batch-byte-boundaries)
 boundary_batch="$TEST_ROOT/batch-byte-boundaries.batch"
-"$PYTHON" - "$WRAPPER" "$MARKER" "$boundary_home" "$boundary_batch" <<'PY'
+"$PYTHON" - "$WRAPPER" "$MARKER" "$boundary_home" "$boundary_batch" "$SYSTEM" <<'PY'
 import ipaddress
 import json
 import os
@@ -1222,25 +1225,27 @@ import subprocess
 import sys
 from pathlib import Path
 
-wrapper, marker, home, batch = sys.argv[1:]
+wrapper, marker, home, batch, system = sys.argv[1:]
 environment = os.environ.copy()
 environment["HOME"] = home
 marker_bytes = marker.encode("utf-8")
 nbsp_name = "nbsp" + chr(0xA0) + "-wrapper.example"
 vt_name = "vt" + chr(0x0B) + "-wrapper.example"
 ip6_int_name = ipaddress.ip_address("2001:db8::7").reverse_pointer[:-4] + "int"
-payload = "".join(
-    (
-        "# physical comment is ignored\n",
-        "; physical comment is ignored\n",
-        " # @127.0.0.1 -p 9 comment +short +time=1 +tries=1\n",
-        " ; @127.0.0.1 -p 9 comment +short +time=1 +tries=1\n",
-        "@127.0.0.1 -p 9 {} A +short +time=1 +tries=1\n".format(nbsp_name),
-        "@127.0.0.1 -p 9 {} A +short +time=1 +tries=1\n".format(vt_name),
-        "@127.0.0.1 -p 9 cr-order-wrapper.example A -t MX\rA +short +time=1 +tries=1\n",
-        "@127.0.0.1 -p 9 -i\r-x 2001:db8::7 +short +time=1 +tries=1\n",
+payload_lines = [
+    "# physical comment is ignored\n",
+    "; physical comment is ignored\n",
+    " # @127.0.0.1 -p 9 comment +short +time=1 +tries=1\n",
+    " ; @127.0.0.1 -p 9 comment +short +time=1 +tries=1\n",
+    "@127.0.0.1 -p 9 {} A +short +time=1 +tries=1\n".format(nbsp_name),
+    "@127.0.0.1 -p 9 {} A +short +time=1 +tries=1\n".format(vt_name),
+    "@127.0.0.1 -p 9 cr-order-wrapper.example A -t MX\rA +short +time=1 +tries=1\n",
+]
+if system == "Darwin":
+    payload_lines.append(
+        "@127.0.0.1 -p 9 -i\r-x 2001:db8::7 +short +time=1 +tries=1\n"
     )
-)
+payload = "".join(payload_lines)
 Path(batch).write_bytes(payload.encode("utf-8"))
 
 
@@ -1294,8 +1299,9 @@ expected = {
     "vt\\011-wrapper.example": 3,
     "cr-order-wrapper.example": 2,
     "a": 2,
-    ip6_int_name: 2,
 }
+if system == "Darwin":
+    expected[ip6_int_name] = 2
 if state.get("version") != 2 or state.get("counts") != expected:
     raise SystemExit(
         "FAIL: comment/NBSP/VT/CR batch state is wrong: {!r}".format(state)
@@ -1421,9 +1427,9 @@ if b'"not-a-hex-cookie"' not in cookie.stdout:
 if records().get(cookie_name) != "not-a-hex-cookie":
     raise SystemExit("FAIL: cookie alias did not persist")
 
-# Hexadecimal +cookie= is left for Apple's dig.  macOS DiG 9.10.6 does not
-# implement that option, so the real binary may exit 1 with "Invalid option".
-# The wrapper must still refuse to persist it as a TXT overlay.
+# Hexadecimal +cookie= is left for the real dig.  macOS DiG 9.10.6 does not
+# implement that option; Linux BIND dig does.  The wrapper must still refuse
+# to persist it as a TXT overlay.
 hex_value = "0123456789abcdef"
 try:
     hex_cookie = subprocess.run(

@@ -1,11 +1,12 @@
 #!/bin/sh
-# Install the wrapper into the current user's PATH without modifying /usr/bin/dig.
+# Install the wrapper into the current user's PATH without modifying the system dig.
 set -eu
 
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
 # Prevent macOS tar from adding hidden AppleDouble (._*) archive members that
 # would make the strict restore validator reject an otherwise normal backup.
+# Linux tar ignores this variable.
 COPYFILE_DISABLE=1
 export COPYFILE_DISABLE
 umask 077
@@ -15,8 +16,20 @@ die() {
     exit 1
 }
 
+SYSTEM=$(uname -s)
+case "$SYSTEM" in
+    Darwin|Linux) ;;
+    *) die "unsupported platform: $SYSTEM" ;;
+esac
+
 sha256_file() {
-    /usr/bin/shasum -a 256 "$1" | /usr/bin/awk '{print $1}'
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | /usr/bin/awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | /usr/bin/awk '{print $1}'
+    else
+        die 'sha256sum or shasum is required'
+    fi
 }
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
@@ -44,7 +57,7 @@ LAST_BACKUP=$SHARE_ROOT/LAST_BACKUP
 [ -f "$ARCHIVE_VALIDATOR" ] && [ ! -L "$ARCHIVE_VALIDATOR" ] || \
     die 'scripts/validate_archive.py must be a regular file'
 
-# BSD mv treats an existing directory operand as a destination directory.  Do
+# mv treats an existing directory operand as a destination directory.  Do
 # these checks before creating backup directories or touching target/state so
 # neither a directory nor a symlink-to-directory can redirect installation.
 if [ -d "$LAST_BACKUP" ]; then
@@ -110,10 +123,15 @@ fi
 
 WRAPPER_SHA=$(sha256_file "$SOURCE")
 printf '%s\n' "$WRAPPER_SHA" > "$BACKUP_DIR/wrapper.sha256"
-/usr/bin/shasum -a 256 "$REAL_DIG" > "$BACKUP_DIR/system-dig.sha256"
-/usr/bin/codesign -dv --verbose=4 "$REAL_DIG" \
-    > "$BACKUP_DIR/system-dig.codesign.txt" 2>&1 || \
-    die 'Apple code-signature inspection failed; installation was not attempted'
+sha256_file "$REAL_DIG" > "$BACKUP_DIR/system-dig.sha256"
+if [ "$SYSTEM" = Darwin ] && [ -x /usr/bin/codesign ]; then
+    /usr/bin/codesign -dv --verbose=4 "$REAL_DIG" \
+        > "$BACKUP_DIR/system-dig.codesign.txt" 2>&1 || \
+        die 'system dig code-signature inspection failed; installation was not attempted'
+else
+    printf 'code-signature inspection is not available on %s\n' "$SYSTEM" \
+        > "$BACKUP_DIR/system-dig.codesign.txt"
+fi
 
 cat > "$BACKUP_DIR/manifest.txt" <<EOF
 format=1

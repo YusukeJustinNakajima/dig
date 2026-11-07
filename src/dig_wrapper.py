@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Stateful wrapper around Apple's dig binary."""
+"""Stateful wrapper around the system dig binary."""
 
 import fcntl
 import ipaddress
@@ -184,7 +184,7 @@ def marker_owner_name(name: str) -> str:
 
 
 def reverse_query_name(value: str, use_ip6_int: bool = False) -> str:
-    """Mirror Apple dig's ``-x`` presentation-name transformation.
+    """Mirror the system dig's ``-x`` presentation-name transformation.
 
     Only a syntactically valid IPv6 literal gets nibble expansion.  Every
     other spelling is reversed by its literal dots, including partial IPv4,
@@ -200,8 +200,8 @@ def reverse_query_name(value: str, use_ip6_int: bool = False) -> str:
             pointer = address.reverse_pointer
         except ValueError:
             # Some ipaddress versions accept a scoped IPv6 literal but cannot
-            # render its reverse pointer.  Apple dig treats that spelling as
-            # ordinary dot-reversed input instead.
+            # render its reverse pointer.  The system dig treats that spelling
+            # as ordinary dot-reversed input instead.
             pass
         else:
             return pointer[:-4] + "int" if use_ip6_int else pointer
@@ -228,7 +228,7 @@ def parse_args(
     global_short = inherited_short
     current: Optional[Query] = None
     seen_host = False
-    # Apple dig parses options left-to-right.  Before an explicit -t/-c,
+    # dig parses options left-to-right.  Before an explicit -t/-c,
     # type/class spellings are option-like positional tokens; after it, the
     # same bare spellings are query names.
     explicit_type_or_class = False
@@ -706,7 +706,7 @@ def expand_positional_txt(args: List[str]) -> List[str]:
 def extract_txt_value(
     args: List[str],
 ) -> Tuple[List[str], Optional[str], Optional[int]]:
-    """Strip local TXT-overlay tokens before Apple's dig sees them.
+    """Strip local TXT-overlay tokens before the system dig sees them.
 
     ``+txt=<value>`` registers <value> as the TXT overlay for every name
     queried on this invocation; an empty value removes the overlay again.
@@ -956,7 +956,7 @@ def main() -> int:
     except Exception:
         # Parsing is only an optimization for state tracking.  If it cannot
         # faithfully model an invocation, delegate all observable behavior to
-        # Apple's dig instead of emitting a wrapper-only error or marker.
+        # the real dig instead of emitting a wrapper-only error or marker.
         return return_like_child(run_real_dig(args, stdin_payload))
     for query in queries:
         canonical_name = canonical_trackable_name(query.name)
