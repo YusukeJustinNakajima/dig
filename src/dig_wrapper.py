@@ -938,9 +938,9 @@ def local_state_error(stage: str, error: Exception) -> str:
     if type(number) is int:
         reason += " errno={}".format(number)
     return (
-        "dig-wrapper: LOCAL STATE ERROR (本地状态错误) [{}]: {}; "
-        "local operation incomplete (本地操作未完成); "
-        "network result unchanged (网络结果未变).\n"
+        "dig-wrapper: LOCAL STATE ERROR [{}]: {}; "
+        "local operation incomplete; "
+        "network result unchanged.\n"
     ).format(stage, reason)
 
 

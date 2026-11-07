@@ -1,41 +1,41 @@
 # dig
 
-macOS 上的本地 `dig` 包装器。真正发查询的还是系统自带的 `/usr/bin/dig`。这个项目只在你自己的终端输出后面追加一条本地 TXT，方便本地测试。
+A local `dig` wrapper for macOS. The actual query is still sent by the system's built-in `/usr/bin/dig`. This project only appends a local TXT record after your own terminal output, to make local testing easier.
 
-它不改 DNS，不写 zone file（区域文件），也不碰任何云厂商。
+It does not change DNS, does not write zone files, and does not touch any cloud provider.
 
-## 行为
+## Behavior
 
-**给某个域名钉死一条 TXT，之后每次查都返回**
+**Pin a TXT record to a domain, and every subsequent query returns it**
 
 ```sh
 dig +txt=<value> TXT <name>
 dig +txt=<value> +ttl=600 TXT <name>
 ```
 
-- `name`：域名，比如 `app.local`
-- `value`：这条 TXT 的内容，写在 `+txt=` 后面。有空格就加引号
-- `+ttl=<秒>`：展示用的 TTL，默认 600
+- `name`: domain name, e.g. `app.local`
+- `value`: the content of this TXT record, written after `+txt=`. Quote it if it contains spaces
+- `+ttl=<seconds>`: display-only TTL, default 600
 
 ```sh
 dig +txt=env=staging TXT app.local
 dig +short TXT app.local              # "env=staging"
-dig +txt='hello world' TXT app.local  # 值里有空格
-dig +txt= TXT app.local               # 删掉这个域名的记录
+dig +txt='hello world' TXT app.local  # value contains spaces
+dig +txt= TXT app.local               # remove the record for this domain
 ```
 
-也可以写成位置参数：
+It can also be written as positional arguments:
 
 ```sh
 dig app.local env=staging
 dig app.local -- "hello world"
 ```
 
-只对查询类型 `TXT` / `ANY` 生效，查 `A` 看不到。设了 `example.com`，查 `x.example.com` 也会命中。`dig -h` 里看不到 `+txt=`，这个参数在交给系统 `dig` 之前就被剥掉了。
+It only applies to query types `TXT` / `ANY`; querying `A` will not show it. Setting `example.com` also matches queries for `x.example.com`. `+txt=` does not appear in `dig -h`; this argument is stripped before being passed to system `dig`.
 
-非十六进制的 `+cookie=<value>` 同样是在设 `value`。真正的十六进制 cookie 会原样传给系统 `dig`。
+A non-hexadecimal `+cookie=<value>` likewise sets `value`. A real hexadecimal cookie is passed through to system `dig` unchanged.
 
-完整输出里，系统 `dig` 的 HEADER、`ANSWER:` 计数和 `MSG SIZE rcvd` **保持网络应答原样**。本地 TXT 写在这段输出后面，中间空一行，例如：
+In full output, system `dig`'s HEADER, `ANSWER:` count, and `MSG SIZE rcvd` **remain exactly as the network response**. The local TXT is written after that output, separated by a blank line, for example:
 
 ```text
 ;; MSG SIZE  rcvd: 100
@@ -43,56 +43,56 @@ dig app.local -- "hello world"
 app.local.	600	IN	TXT	"env=staging"
 ```
 
-`+short` 时只多一行带引号的值。不会改写 `ANSWER SECTION`，也不会在 stderr 打来源说明。
+With `+short`, only one additional quoted line appears. `ANSWER SECTION` is not rewritten, and no provenance note is printed to stderr.
 
-同一域名的第 2 次查询**不会**再追加 `_zcode-verify` 标记。本机仍会记查询次数，但不改输出。
+A second query for the same domain **does not** append a `_zcode-verify` marker again. The local machine still records the query count, but the output is unchanged.
 
-![DNS 验证通过，三个解析器 TXT 结果一致](docs/digdns.png)
+![DNS verification passed, TXT results from three resolvers match](docs/digdns.png)
 
-## 安装
+## Installation
 
-只支持 macOS，需要 `/usr/bin/dig` 和 `/usr/bin/python3`，没有 pip 依赖。
+macOS only; requires `/usr/bin/dig` and `/usr/bin/python3`, with no pip dependencies.
 
 ```sh
 git clone https://github.com/xsser/dig.git
 cd dig
 ./scripts/install.sh
 export PATH="$HOME/.local/bin:$PATH"
-command -v dig    # 应该是 ~/.local/bin/dig
+command -v dig    # should be ~/.local/bin/dig
 ```
 
-安装脚本会先备份现有的 `~/.local/bin/dig`。如果 `command -v dig` 不是这个路径，包装器根本不会生效。
+The install script backs up any existing `~/.local/bin/dig` first. If `command -v dig` is not this path, the wrapper will not take effect at all.
 
-已经打开的 zsh 可能还记着旧路径，执行一次 `rehash`。
+An already-open zsh may still remember the old path; run `rehash` once.
 
-## 恢复
+## Restore
 
 ```sh
 ./scripts/restore.sh
 ```
 
-恢复的是安装前的那个文件，不一定等于系统 `/usr/bin/dig`。临时不想走包装器，直接调用 `/usr/bin/dig`。
+This restores the file that existed before installation, which is not necessarily the same as the system `/usr/bin/dig`. To bypass the wrapper temporarily, call `/usr/bin/dig` directly.
 
-不要手工解包备份目录。
+Do not manually unpack the backup directory.
 
-## 状态
+## State
 
-计数和钉死的 TXT 存在：
+Counters and pinned TXT records are stored in:
 
 ```text
 ~/.cache/dig-zcode-wrapper
 ```
 
-这是本机测试状态，不是 DNS 证据，别提交、别拿去验证域名所有权。
+This is local test state, not DNS evidence. Do not commit it, and do not use it to verify domain ownership.
 
-## 验证
+## Verification
 
 ```sh
 make verify
 ```
 
-## 限制
+## Limitations
 
-- 只在 macOS 上、且 `~/.local/bin` 排在 PATH 前面时有效
-- 多出来的 TXT 只存在于这次命令的输出里
-- 它不会替代递归解析器或权威服务器，也不会改变 `/usr/bin/dig` 所使用的 DNS 网络路径
+- Only works on macOS, and only when `~/.local/bin` precedes other entries in PATH
+- The extra TXT exists only in the output of this command
+- It does not replace a recursive resolver or authoritative server, and does not change the DNS network path used by `/usr/bin/dig`
